@@ -1,0 +1,17 @@
+{
+    "version" : "2017-02-28",
+    "operation" : "PutItem",
+    "key" : {
+        "PK": $util.dynamodb.toDynamoDBJson($ctx.args.input.customer),
+        "SK": $util.dynamodb.toDynamoDBJson("${ctx.args.input.user}-${ctx.args.input.uploadedTime}"),
+        "GS1PK": $util.dynamodb.toDynamoDBJson("ACTION"),
+        "GS1SK": $util.dynamodb.toDynamoDBJson("${ctx.args.input.customer}-${ctx.args.input.uploadedTime}"),
+    },
+    "attributeValues" : {
+        "FileName" : $util.dynamodb.toDynamoDBJson($ctx.args.input.fileName),
+        "FileSize" : $util.dynamodb.toDynamoDBJson($ctx.args.input.fileSize),
+        "Customer": $util.dynamodb.toDynamoDBJson($ctx.args.input.customer),
+        "User": $util.dynamodb.toDynamoDBJson($ctx.args.input.user),
+        "uploadedTime":  $util.dynamodb.toDynamoDBJson($ctx.args.input.uploadedTime)
+        }
+}

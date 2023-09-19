@@ -1,0 +1,17 @@
+{
+  "name": "fargate",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "compressVideo": "run-func index.js compressVideo"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "run-func": "^3.0.0",
+    "@aws-sdk/client-s3": "^3.161.0",
+    "@aws-sdk/s3-request-presigner": "^3.161.0"
+  }
+}

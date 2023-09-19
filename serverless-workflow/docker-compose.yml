@@ -1,0 +1,14 @@
+version: '3'
+services:
+  todo-docker:
+    build:
+       context: todo-docker 
+       dockerfile: ./Dockerfile
+    image: todo-docker-dev
+    container_name: todo-docker-dev
+    volumes:
+       - junayed:/app
+    ports:
+      - "3000:3000"
+volumes:
+  junayed:

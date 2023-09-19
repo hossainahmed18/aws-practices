@@ -1,0 +1,36 @@
+type UserActivity {
+	customer: String
+    user: String
+	fileName: String
+    fileSize:String
+	uploadTime: String
+}
+
+input CreateUserActivityInput {
+	customer: String!
+	user: String!
+	uploadTime: String!
+	fileName: String!
+	fileSize: String!
+}
+
+input SearchActivityInput {
+	customer: String
+	user: String
+	startDate: String
+	endDate: String
+}
+
+type Mutation {
+	createUserAvtivity(input: CreateUserActivityInput!): UserActivity
+}
+
+type Query {
+	getuserActivitiesFromLambda(input: SearchActivityInput): [UserActivity]!
+	getuserActivitiesByCustomerAndUser(customer: String!, user: String!): [UserActivity]
+	getuserActivitiesByUserAndDateRange(customer: String!, user: String!, startDate: String!, endDate:String!): [UserActivity]
+}
+schema {
+	query: Query
+	mutation: Mutation
+}

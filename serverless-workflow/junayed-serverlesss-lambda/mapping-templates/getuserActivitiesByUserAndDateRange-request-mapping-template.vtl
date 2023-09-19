@@ -1,0 +1,13 @@
+{
+    "version" : "2017-02-28",
+    "operation" : "Query",
+    "query" : {
+        ## Provide a query expression. **
+        "expression": "pk = :pk AND sk BETWEEN :startDate AND :endDate",
+        "expressionValues" : {
+            ":pk" : $util.dynamodb.toDynamoDBJson($ctx.args.customer),
+            ":startDate": $util.dynamodb.toDynamoDBJson($ctx.args.startDate),
+            ":endDate": $util.dynamodb.toDynamoDBJson($ctx.args.endDate)
+        }
+    }
+}

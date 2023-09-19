@@ -1,0 +1,15 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 16
+    commands:
+      - cd junayed-task/junayed-serverlesss-lambda
+      - npm install
+  build:
+    commands:
+      - chmod u+x build_layer.sh
+      - ./build_layer.sh
+      - npm install -g serverless
+      - serverless deploy

@@ -1,0 +1,20 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 16
+    commands:
+        - cd junayed-task/to-do-app
+        - npm install
+  build:
+    commands:
+        - npm run-script build
+  post_build:
+    commands:
+        - npm install -g serverless
+        - npm install serverless-s3-sync
+        - serverless deploy
+artifacts:
+  files:
+    - 'junayed-task/to-do-app/build/*'

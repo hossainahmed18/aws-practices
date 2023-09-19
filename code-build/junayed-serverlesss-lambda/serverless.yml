@@ -1,0 +1,303 @@
+service: junayeds-services
+frameworkVersion: '3'
+plugins:
+   - serverless-appsync-plugin
+
+provider:
+  name: aws
+  runtime: nodejs16.x
+  region: ${env:AWS_REGION}
+  deploymentBucket:
+    name: ${env:DEPLOYMENT_BUCKET}
+  httpApi:
+    cors:
+      allowedOrigins: '*'
+      allowedHeaders:
+        - Content-Type
+        - Authorization
+      allowedMethods: '*'
+
+  iam:
+    role:
+      statements:
+        - Effect: Allow
+          Action: 's3:ListBucket'
+          Resource: '*'
+        - Effect: Allow
+          Action:
+            - 's3:GetObject'
+            - 's3:PutObject'
+            - 's3:DeleteObject'
+          Resource:
+            - 'arn:aws:s3:::${env:BUCKET_NAME}/*'
+        - Effect: Allow
+          Action:
+            - dynamodb:*
+          Resource: [!GetAtt DynamoDbTable.Arn, !Join [ '/',[!GetAtt DynamoDbTable.Arn,index/*]]]
+        - Effect: Allow
+          Action:
+            - sns:*
+          Resource: !Ref SNSTopic
+
+        - Effect: Allow
+          Action:
+            - sqs:*
+          Resource: 
+            Fn::GetAtt: [ UoloadQueue, Arn ]
+        - Effect: Allow
+          Action: 'ecs:RunTask'
+          Resource: '*'
+        - Effect: Allow
+          Action: 'iam:PassRole'
+          Resource: !GetAtt ECSTaskRole.Arn
+functions:
+  uploadEngine:
+    handler: handler.uploadEngine
+    layers:
+      - !Ref JunayedFfmpegLambdaLayer
+    environment:
+      BUCKET_NAME: ${env:BUCKET_NAME}
+      TABLE_NAME: ${env:TABLE_NAME}
+      TOPIC_NAME: ${env:TOPIC_NAME}
+      WEBHOOK_URL: ${env:WEBHOOK_URL}
+      ACCOUNT_ID: ${env:ACCOUNT_ID}
+      UPLOAD_FOLDER: ${env:UPLOAD_FOLDER}
+      CONTAINER_NAME: ${env:CONTAINER_NAME}
+      TASK_DEFINITION: ${env:TASK_DEFINITION}
+      SUB_NET: ${env:SUB_NET}
+    events:
+      - httpApi:
+          path: /
+          method: get
+      - httpApi:
+          path: /userActivity
+          method: post
+      - httpApi:
+          path: /userActivity
+          method: Get
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - UoloadQueue
+              - Arn
+      - stream:
+          type: dynamodb
+          arn: 
+            Fn::GetAtt: [DynamoDbTable, StreamArn]
+      - sns:
+          arn: !Ref SNSTopic
+          topicName: ${env:TOPIC_NAME}
+    timeout: 30
+resources:
+   Resources:
+      UoloadQueue:
+        Type: AWS::SQS::Queue
+        Properties:
+          QueueName: ${env:QUEUE_NAME}
+      
+      S3EventQueuePolicy:
+        Type: AWS::SQS::QueuePolicy
+        DependsOn: UoloadQueue
+        Properties:
+          PolicyDocument:
+            Id: SQSPolicy
+            Statement:
+              - Effect: Allow
+                Action: SQS:*
+                Resource: !GetAtt UoloadQueue.Arn
+                Principal:
+                  Service: s3.amazonaws.com
+          Queues:
+            - !Ref UoloadQueue
+
+      LambdaPermissionbucketS3:
+        DependsOn:
+          - UploadEngineLambdaFunction
+        Type: AWS::Lambda::Permission
+        Properties:
+          FunctionName:
+            "Fn::GetAtt": [ UploadEngineLambdaFunction, Arn ]
+          Action: "lambda:InvokeFunction"
+          Principal: "s3.amazonaws.com"
+          SourceArn: 'arn:aws:s3:::${env:BUCKET_NAME}'
+
+      S3Resource:
+        Type: 'AWS::S3::Bucket'
+        DependsOn:
+          - UoloadQueue
+        Properties:
+          BucketName: ${env:BUCKET_NAME}
+          CorsConfiguration:
+            CorsRules:
+              - AllowedHeaders:
+                  - '*'
+                AllowedMethods:
+                  - PUT
+                AllowedOrigins:
+                  - '*'
+          NotificationConfiguration:
+            QueueConfigurations:
+              - Event: 's3:ObjectCreated:*'
+                Queue: !GetAtt UoloadQueue.Arn
+                Filter: 
+                  S3Key: 
+                    Rules:
+                      - Name: prefix
+                        Value: '${env:UPLOAD_FOLDER}'
+            LambdaConfigurations:
+              - Event: 's3:ObjectRemoved:*'
+                Function:
+                  "Fn::GetAtt": [ UploadEngineLambdaFunction, Arn ]
+
+      DynamoDbTable:
+        Type: AWS::DynamoDB::Table
+        Properties:
+          TableName: ${env:TABLE_NAME}
+          AttributeDefinitions:
+              - AttributeName: pk
+                AttributeType: S
+              - AttributeName: sk
+                AttributeType: S
+              - AttributeName: gsi1pk
+                AttributeType: S
+              - AttributeName: gsi1sk
+                AttributeType: S
+          KeySchema:
+            - AttributeName: pk
+              KeyType: HASH
+            - AttributeName: sk
+              KeyType: RANGE
+          GlobalSecondaryIndexes:
+          - IndexName: ActivityIndex
+            KeySchema:
+              - AttributeName: gsi1pk
+                KeyType: HASH
+              - AttributeName: gsi1sk
+                KeyType: RANGE
+            Projection:
+              ProjectionType: 'ALL'
+            ProvisionedThroughput:
+              ReadCapacityUnits: 1
+              WriteCapacityUnits: 1
+          ProvisionedThroughput:
+            ReadCapacityUnits: 1
+            WriteCapacityUnits: 1
+          StreamSpecification:
+            StreamViewType: NEW_IMAGE
+
+      SNSTopic:
+        Type: AWS::SNS::Topic
+        Properties:
+          TopicName: ${env:TOPIC_NAME}
+      
+      LogGroup:
+        Type: AWS::Logs::LogGroup
+        Properties:
+          LogGroupName: "${env:CONTAINER_NAME}-logging"
+          RetentionInDays: 90
+
+      FargateTaskDefinition:
+        DependsOn: 
+          - ECSTaskRole
+        Type: AWS::ECS::TaskDefinition
+        Properties:
+          Family: ${env:TASK_DEFINITION}
+          Cpu: 512
+          Memory: 1024
+          NetworkMode: awsvpc
+          ExecutionRoleArn: !GetAtt ECSTaskRole.Arn
+          TaskRoleArn: !GetAtt ECSTaskRole.Arn
+          RequiresCompatibilities: 
+            - FARGATE
+          ContainerDefinitions:
+            - Name: ${env:CONTAINER_NAME}
+              Cpu: 512
+              Memory: 1024
+              Image: '${env:REPO_URL}:latest'
+              Environment:
+                - Name: BUCKET_NAME
+                  Value : ${env:BUCKET_NAME}
+              LogConfiguration:
+                LogDriver: awslogs
+                Options:
+                    awslogs-group: "${env:CONTAINER_NAME}-logging"
+                    awslogs-region: '${env:AWS_REGION}'
+                    awslogs-stream-prefix: ecs
+      ECSTaskRole:
+        Type: AWS::IAM::Role
+        Properties:
+          RoleName: JunayedECSTask
+          AssumeRolePolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Principal:
+                  Service:
+                    - ecs-tasks.amazonaws.com
+                Action: sts:AssumeRole
+
+          Policies:
+            - PolicyName: JunayedECSTaskExecutionPlicy
+              PolicyDocument:
+                Statement:
+                  - Effect: Allow
+                    Action: 
+                      - 'ecr:GetAuthorizationToken'
+                      - 'ecr:BatchCheckLayerAvailability'
+                      - 'ecr:GetDownloadUrlForLayer'
+                      - 'ecr:BatchGetImage'
+                      - 'logs:CreateLogStream'
+                      - 'logs:PutLogEvents'
+                    Resource: '*'
+                  - Effect: Allow
+                    Action:
+                      - 's3:GetObject'
+                      - 's3:PutObject'
+                      - 's3:CopyObject'
+                    Resource:
+                      - 'arn:aws:s3:::${env:BUCKET_NAME}/*'
+layers:
+  JunayedFfmpeg:
+    path: layers/ffmpeg
+
+custom:
+  accountId: ${env:ACCOUNT_ID}
+  appSync:
+    name: junayed-app-sync
+    authenticationType: API_KEY
+    mappingTemplates:
+      - dataSource: userAvtivityDataSource
+        type: Mutation
+        field: createUserAvtivity
+        request: "createUserAvtivity-request-mapping-template.vtl"
+        response: "createUserAvtivity-response-mapping-template.vtl"
+      - dataSource: userAvtivityDataSource
+        type: Query
+        field: getuserActivitiesByUserAndDateRange
+        request: "getuserActivitiesByUserAndDateRange-request-mapping-template.vtl"
+        response: "getuserActivitiesByUserAndDateRange-response-mapping-template.vtl"
+      - dataSource: userAvtivityDataSource
+        type: Query
+        field: getuserActivitiesByCustomerAndUser
+        request: "getuserActivitiesByCustomerAndUser-request-mapping-template.vtl"
+        response: "getuserActivitiesByCustomerAndUser-response-mapping-template.vtl"
+      - dataSource: awsLambdaDataSource
+        type: Query
+        field: getuserActivitiesFromLambda
+        request: "lambda-request-mapping-template.vtl"
+        response: "lambda-response-mapping-template.vtl"
+
+    schema: schema.graphql
+    serviceRole: "JunayedAppSyncServiceRole"
+    dataSources:
+      - type: AMAZON_DYNAMODB
+        name: userAvtivityDataSource
+        description: 'User Activity Table'
+        config:
+          tableName: '${env:TABLE_NAME}'
+      - type: AWS_LAMBDA
+        name: awsLambdaDataSource
+        description: 'Lambda DataSource'
+        config:
+          lambdaFunctionArn: 
+            Fn::GetAtt: [UploadEngineLambdaFunction, Arn]
